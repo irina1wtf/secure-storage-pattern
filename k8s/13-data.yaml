@@ -1,0 +1,71 @@
+# Data-Service — единственный компонент с доступом к базе данных PostgreSQL
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-service
+  namespace: secure-storage
+  labels: {app: data-service}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: data-service}
+  template:
+    metadata:
+      labels: {app: data-service}
+    spec:
+      serviceAccountName: data-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: data-service
+          image: secure-storage/data:1.0
+          imagePullPolicy: Never           # образ собран и импортирован локально
+          ports: [{containerPort: 8000}]
+          env:
+            - name: CTX_BUSINESS_KEY
+              valueFrom: {secretKeyRef: {name: ctx-business-key, key: key}}
+            - name: DATA_KEY
+              valueFrom: {secretKeyRef: {name: data-key, key: DATA_KEY}}
+            - name: AUDIT_URL
+              value: "http://audit-service:8000"
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_USER
+              valueFrom: {secretKeyRef: {name: db-credentials, key: POSTGRES_USER}}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: db-credentials, key: POSTGRES_PASSWORD}}
+            - name: DB_NAME
+              valueFrom: {secretKeyRef: {name: db-credentials, key: POSTGRES_DB}}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-service
+  namespace: secure-storage
+spec:
+  type: ClusterIP
+  selector: {app: data-service}
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,109 @@
+# Каждый микросервис работает под своей сервисной учётной записью без прав
+# в API Kubernetes. Роль app-admin моделирует администратора приложений
+# поставщика: он управляет конфигурацией, но не видит секреты и не может
+# изменить эталон, сетевые политики и роли
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: gateway-sa, namespace: secure-storage}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: authz-sa, namespace: secure-storage}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: business-sa, namespace: secure-storage}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: data-sa, namespace: secure-storage}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: audit-sa, namespace: secure-storage}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: app-admin, namespace: secure-storage}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-admin-role
+  namespace: secure-storage
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/attach"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["app-config"]          # только рабочая конфигурация, не эталон
+    verbs: ["update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-admin-binding
+  namespace: secure-storage
+subjects:
+  - kind: ServiceAccount
+    name: app-admin
+    namespace: secure-storage
+roleRef:
+  kind: Role
+  name: app-admin-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Администратор безопасности работает со своей машины (ВМ user, сторона клиента).
+# Он может только прочитать рабочую конфигурацию и записать эталон и открытый
+# ключ. Закрытый ключ подписи хранится у него и в кластер не попадает
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: security-admin, namespace: secure-storage}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: security-admin-role
+  namespace: secure-storage
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["app-config", "config-etalon"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["config-etalon"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["etalon-pubkey"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create"]                     # первое создание эталона и ключа
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: security-admin-binding
+  namespace: secure-storage
+subjects:
+  - kind: ServiceAccount
+    name: security-admin
+    namespace: secure-storage
+roleRef:
+  kind: Role
+  name: security-admin-role
+  apiGroup: rbac.authorization.k8s.io

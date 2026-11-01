@@ -1,0 +1,68 @@
+# Audit-Service — журнал событий и модуль контроля целостности конфигураций
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: secure-storage
+  labels: {app: audit-service}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: audit-service}
+  template:
+    metadata:
+      labels: {app: audit-service}
+    spec:
+      serviceAccountName: audit-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: audit-service
+          image: secure-storage/audit:1.0
+          imagePullPolicy: Never           # образ собран и импортирован локально
+          ports: [{containerPort: 8000}]
+          env:
+            - name: CHECK_INTERVAL
+              value: "20"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: audit-log, mountPath: /var/log/audit}
+            - {name: app-config, mountPath: /config/app, readOnly: true}
+            - {name: etalon, mountPath: /config/etalon, readOnly: true}
+            - {name: pubkey, mountPath: /config/pubkey, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: audit-log, persistentVolumeClaim: {claimName: audit-pvc}}
+        - {name: app-config, configMap: {name: app-config}}           # проверяемая конфигурация
+        - {name: etalon, configMap: {name: config-etalon}}            # подписанный эталон
+        - {name: pubkey, secret: {secretName: etalon-pubkey}}         # открытый ключ админа безопасности
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  namespace: secure-storage
+spec:
+  type: ClusterIP
+  selector: {app: audit-service}
+  ports:
+    - port: 8000
+      targetPort: 8000

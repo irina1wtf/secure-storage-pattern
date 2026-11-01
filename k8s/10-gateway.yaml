@@ -1,0 +1,72 @@
+# API-Gateway — единственный сервис, опубликованный наружу (NodePort 30080)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: secure-storage
+  labels: {app: gateway}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: gateway}
+  template:
+    metadata:
+      labels: {app: gateway}
+    spec:
+      serviceAccountName: gateway-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: secure-storage/gateway:1.0
+          imagePullPolicy: Never           # образ собран и импортирован локально
+          ports: [{containerPort: 8000}]
+          env:
+            - name: JWT_SECRET
+              valueFrom: {secretKeyRef: {name: jwt-secret, key: JWT_SECRET}}
+            - name: USERS_JSON
+              valueFrom: {secretKeyRef: {name: users, key: USERS_JSON}}
+            - name: CTX_GATEWAY_KEY
+              valueFrom: {secretKeyRef: {name: ctx-gateway-key, key: key}}
+            - name: TOKEN_TTL
+              valueFrom: {configMapKeyRef: {name: app-config, key: TOKEN_TTL}}
+            - name: AUDIT_URL
+              value: "http://audit-service:8000"
+            - name: AUTHZ_URL
+              value: "http://authz-service:8000"
+            - name: BUSINESS_URL
+              value: "http://business-service:8000"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: secure-storage
+spec:
+  type: NodePort
+  selector: {app: gateway}
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30080

@@ -1,0 +1,12 @@
+# Конфигурация микросервисов. Её хеш подписан администратором безопасности
+# и сверяется модулем контроля целостности в Audit-Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: secure-storage
+data:
+  POLICY_JSON: '{"user": ["write", "read", "list"], "support": []}'
+  VALIDATION_ENABLED: "true"
+  MAX_RECORD_BYTES: "4096"
+  TOKEN_TTL: "900"

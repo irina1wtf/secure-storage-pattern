@@ -1,0 +1,63 @@
+# Authz-Service — точка принятия решений, доступен только шлюзу
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-service
+  namespace: secure-storage
+  labels: {app: authz-service}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-service}
+  template:
+    metadata:
+      labels: {app: authz-service}
+    spec:
+      serviceAccountName: authz-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: authz-service
+          image: secure-storage/authz:1.0
+          imagePullPolicy: Never           # образ собран и импортирован локально
+          ports: [{containerPort: 8000}]
+          env:
+            - name: CTX_GATEWAY_KEY
+              valueFrom: {secretKeyRef: {name: ctx-gateway-key, key: key}}
+            - name: POLICY_JSON
+              valueFrom: {configMapKeyRef: {name: app-config, key: POLICY_JSON}}
+            - name: AUDIT_URL
+              value: "http://audit-service:8000"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-service
+  namespace: secure-storage
+spec:
+  type: ClusterIP
+  selector: {app: authz-service}
+  ports:
+    - port: 8000
+      targetPort: 8000

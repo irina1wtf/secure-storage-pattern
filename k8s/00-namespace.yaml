@@ -1,0 +1,9 @@
+# Отдельное пространство имён паттерна. Pod Security: baseline запрещает
+# привилегированные поды, restricted выдаёт предупреждения о нарушениях
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-storage
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted

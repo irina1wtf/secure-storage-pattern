@@ -1,0 +1,65 @@
+# Локальный запуск для отладки (без Kubernetes и сетевых политик).
+# docker compose up --build  →  шлюз на http://localhost:8080
+x-common: &common
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+x-keys: &keys
+  CTX_GATEWAY_KEY: dev-gateway-key-change-me
+  CTX_BUSINESS_KEY: dev-business-key-change-me
+  AUDIT_URL: http://audit-service:8000
+
+services:
+  gateway:
+    <<: *common
+    build: {context: ./services, args: {SERVICE: gateway}}
+    ports: ["8080:8000"]            # единственный опубликованный порт
+    environment:
+      <<: *keys
+      JWT_SECRET: dev-jwt-secret-change-me
+      USERS_JSON: ${USERS_JSON}
+  authz-service:
+    <<: *common
+    build: {context: ./services, args: {SERVICE: authz}}
+    environment:
+      <<: *keys
+      POLICY_JSON: '{"user": ["write", "read", "list"], "support": []}'
+  business-service:
+    <<: *common
+    build: {context: ./services, args: {SERVICE: business}}
+    environment:
+      <<: *keys
+      VALIDATION_ENABLED: "true"
+      MAX_RECORD_BYTES: "4096"
+  data-service:
+    <<: *common
+    build: {context: ./services, args: {SERVICE: data}}
+    depends_on: [postgres]
+    environment:
+      <<: *keys
+      DATA_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=   # только для отладки
+      DB_HOST: postgres
+      DB_USER: storage
+      DB_PASSWORD: dev-db-password
+      DB_NAME: storage
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: storage
+      POSTGRES_PASSWORD: dev-db-password
+      POSTGRES_DB: storage
+    volumes: [pgdata:/var/lib/postgresql/data]
+  audit-service:
+    <<: *common
+    build: {context: ./services, args: {SERVICE: audit}}
+    environment:
+      CONFIG_CHECK_ENABLED: "false"   # сверка с эталоном работает только в кластере
+    volumes: [audit:/var/log/audit]
+
+volumes:
+  pgdata:
+  audit:
