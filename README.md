@@ -14,12 +14,13 @@
 | postgres | PostgreSQL 16 (StatefulSet), доступен по сети только для data-service |
 | audit-service | Журнал с цепочкой хешей, сверка конфигурации с подписанным эталоном |
 
-## Быстрый старт (ВМ с Ubuntu Server 24.04 и k3s)
+## Быстрый старт (ВМ с Ubuntu Server 24.06 и k3s)
 
 ```bash
 sudo apt -y install docker.io git curl python3-cryptography
 sudo usermod -aG docker $USER   # затем перелогиниться
-curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 --disable traefik
+curl -fL https://raw.githubusercontent.com/k3s-io/k3s/master/install.sh -o install_k3s.sh
+sudo sh install_k3s.sh --write-kubeconfig-mode 644 --disable traefik --node-ip 192.168.56.10 --flannel-iface enp0s8 --tls-san 192.168.56.10
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 git clone https://github.com/<логин>/secure-storage-pattern.git && cd secure-storage-pattern
 bash scripts/deploy.sh
