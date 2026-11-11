@@ -9,7 +9,7 @@ import uuid
 import httpx
 import jwt
 from fastapi import FastAPI, HTTPException, Request
-from prometheus_client import Counter, make_asgi_app
+from prometheus_client import Counter, Histogram, make_asgi_app
 from pydantic import BaseModel
 
 from common.security import audit_event, sign_context
@@ -26,6 +26,19 @@ app.mount("/metrics", make_asgi_app())
 
 requests_total = Counter("gateway_requests_total", "Запросы через шлюз", ["result"])
 rejected_total = Counter("gateway_rejected_total", "Отклонённые запросы", ["reason"])
+# Время обработки запроса шлюзом (вся цепочка вызовов) — для оценки задержки,
+# которую вносят проверки паттерна. Границы корзин в секундах
+latency = Histogram("gateway_request_duration_seconds", "Время обработки запроса",
+                    ["route"], buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5))
+ROUTES = {("POST", "/login"): "login", ("POST", "/records"): "write",
+          ("GET", "/records"): "list"}
+# Ряды метрик создаются сразу с нулём, чтобы первое событие было видно в мониторинге
+for r in ("login", "write", "list", "read"):
+    latency.labels(route=r)
+for r in ("missing_jwt", "invalid_jwt", "bad_credentials", "authz_deny"):
+    rejected_total.labels(reason=r)
+for r in ("ok", "rejected", "error"):
+    requests_total.labels(result=r)
 
 
 class LoginRequest(BaseModel):
@@ -100,6 +113,19 @@ async def handle(request: Request, operation: str, resource: str, payload=None):
         detail = resp.json().get("detail", "error") if is_json else "upstream_error"
         raise HTTPException(resp.status_code, detail)
     return {"request_id": request_id, **resp.json()}
+
+
+@app.middleware("http")
+async def measure_latency(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    path = request.url.path
+    route = ROUTES.get((request.method, path))
+    if route is None and request.method == "GET" and path.startswith("/records/"):
+        route = "read"
+    if route:
+        latency.labels(route=route).observe(time.perf_counter() - start)
+    return response
 
 
 @app.post("/login")

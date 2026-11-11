@@ -1,0 +1,68 @@
+# Правила оповещения о признаках реализации угрозы УБИ.054.
+# Счётчики с метками (reason) появляются только после первого события, поэтому
+# прирост за 10 минут считается как «текущее значение минус значение 10 минут назад»,
+# а отсутствующий ряд заменяется нулём (or vector(0))
+groups:
+  - name: ubi054
+    rules:
+      - alert: ConfigIntegrityViolation
+        expr: config_integrity_ok == 0
+        labels: {severity: critical, scenario: "2"}
+        annotations:
+          summary: "Конфигурация app-config не совпадает с подписанным эталоном или подпись эталона недействительна"
+
+      - alert: BusinessChainViolation
+        # Business-Service перезапускается при атаке B8, счётчик при этом обнуляется,
+        # поэтому оповещение держится 10 минут после последнего прироста (подзапрос)
+        expr: |
+          max_over_time((
+            (sum(business_blocked_total{reason!~"validation_.*"}) or vector(0))
+              - (sum(business_blocked_total{reason!~"validation_.*"} offset 10m) or vector(0))
+          )[10m:10s]) > 0
+        labels: {severity: critical, scenario: "1"}
+        annotations:
+          summary: "Вызов Business-Service в обход шлюза: подпись контекста не прошла проверку"
+
+      - alert: DataChainViolation
+        expr: increase(data_integrity_failures_total[10m]) > 0
+        labels: {severity: critical, scenario: "1"}
+        annotations:
+          summary: "Обращение к Data-Service в обход Business-Service"
+
+      - alert: DataTamperDetected
+        expr: increase(data_tamper_detected_total[10m]) > 0
+        labels: {severity: critical, scenario: "2"}
+        annotations:
+          summary: "Зашифрованная запись изменена в хранилище в обход приложения"
+
+      - alert: PolicyViolation
+        expr: |
+          (sum(authz_deny_total{reason="policy_violation"}) or vector(0))
+            - (sum(authz_deny_total{reason="policy_violation"} offset 10m) or vector(0)) > 0
+        labels: {severity: warning, scenario: "1"}
+        annotations:
+          summary: "Запрос к данным от роли, которой политика доступа его не разрешает"
+
+      - alert: AuthenticationFailures
+        expr: |
+          (sum(gateway_rejected_total{reason=~"missing_jwt|invalid_jwt|bad_credentials"}) or vector(0))
+            - (sum(gateway_rejected_total{reason=~"missing_jwt|invalid_jwt|bad_credentials"} offset 10m) or vector(0)) >= 3
+        labels: {severity: warning, scenario: "1"}
+        annotations:
+          summary: "Серия отклонённых попыток аутентификации на шлюзе"
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations:
+          summary: "Сервис {{ $labels.job }} не отвечает: метрики не собираются"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(gateway_request_duration_seconds_bucket{route!="login"}[5m]))) > 1
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "95-й процентиль времени ответа на операции с данными выше 1 с"

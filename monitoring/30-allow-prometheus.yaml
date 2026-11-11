@@ -1,0 +1,18 @@
+# Дополнение к сетевым политикам паттерна (k8s/20-network-policies.yaml):
+# к порту 8000 микросервисов допускается только под Prometheus из пространства
+# имён monitoring, чтобы забирать метрики по адресу /metrics/. PostgreSQL в список
+# не входит. Остальные обработчики сервисов для Prometheus бесполезны: без ключей
+# подписи контекста они отвечают отказом
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: metrics-from-prometheus, namespace: secure-storage}
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [gateway, authz-service, business-service, data-service, audit-service]}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+          podSelector: {matchLabels: {app: prometheus}}
+      ports: [{port: 8000}]

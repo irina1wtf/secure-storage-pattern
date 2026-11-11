@@ -14,7 +14,7 @@
 | postgres | PostgreSQL 16 (StatefulSet), доступен по сети только для data-service |
 | audit-service | Журнал с цепочкой хешей, сверка конфигурации с подписанным эталоном |
 
-## Быстрый старт (ВМ с Ubuntu Server 24.06 и k3s)
+## Быстрый старт (ВМ с Ubuntu Server 26.04 и k3s)
 
 ```bash
 sudo apt -y install docker.io git curl python3-cryptography
@@ -36,15 +36,42 @@ services/          код микросервисов и общий Dockerfile
 k8s/               namespace, ConfigMap, RBAC, PVC, Deployment/Service, PostgreSQL, NetworkPolicy
 security-admin/    sign_etalon.py — подпись эталона конфигурации (Ed25519)
 scripts/           deploy.sh, gen_secrets.py, сценарии пользователя и нарушителя
+monitoring/        Prometheus, Grafana, правила оповещения, панель мониторинга
+tests/             модульные (unit) и приёмочные (stand) тесты pytest
 docker-compose.yml локальная отладка без Kubernetes
 ```
 
+## Тесты
+
+```bash
+bash scripts/run_unit_tests.sh          # ВМ cloud: 59 модульных тестов pytest в контейнере python:3.12-slim
+python3 -m pytest tests/stand -v        # ВМ user: 14 приёмочных тестов через API-шлюз
+```
+
+## Мониторинг
+
+```bash
+bash monitoring/deploy_monitoring.sh
+```
+
+Prometheus: `http://<IP>:30900`, Grafana: `http://<IP>:30300` (логин admin, пароль выводит скрипт).
+Сетевая политика `monitoring/30-allow-prometheus.yaml` разрешает Prometheus забирать метрики
+микросервисов, правила оповещения — `monitoring/alerts.yml`.
+
 ## Сценарии проверки
 
-- `scripts/user_scenario.sh` — легитимный пользователь (ВМ user)
-- `scripts/attack_external.sh` — внешний нарушитель (ВМ attacker)
-- `scripts/attack_insider.sh` — администратор приложений поставщика (роль app-admin)
-- `scripts/attack_root.sh` — полные права на кластер: подмена эталона и данных
-- `scripts/show_audit.sh`, `scripts/restore.sh` — журнал аудита и восстановление
+| Скрипт | Где запускать | Что делает |
+| --- | --- | --- |
+| `scripts/user_scenario.sh` | user | работа легитимного пользователя alice |
+| `scripts/traffic.sh` | user | фоновая работа пользователя bob для графиков |
+| `scripts/latency.sh` | user | замер времени ответа |
+| `scripts/check_validation.sh` | user | проверка валидации записей (422 / 200) |
+| `scripts/check_tamper.sh` | user | чтение записи, искажённой в БД (409) |
+| `scripts/attack_external.sh` | attacker | A1–A6: внешний нарушитель |
+| `scripts/attack_insider.sh` | cloud | B1–B8: администратор приложений поставщика (app-admin) |
+| `scripts/attack_root.sh` | cloud | C1–C3: полные права на кластер |
+| `scripts/attack_audit_log.sh` | cloud | C4: удаление строки журнала аудита (запускать последним) |
+| `scripts/show_audit.sh`, `scripts/restore.sh` | cloud | журнал аудита и восстановление |
+| `scripts/run_unit_tests.sh`, `scripts/update_images.sh` | cloud | модульные тесты; пересборка образов |
 
 Секреты в репозитории не хранятся: их создаёт `scripts/gen_secrets.py` при развёртывании.

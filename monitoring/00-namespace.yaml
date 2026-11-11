@@ -1,0 +1,9 @@
+# Отдельное пространство имён средств мониторинга. В VK Cloud ему соответствует
+# аддон Kube Prometheus Stack кластера Managed Kubernetes
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
